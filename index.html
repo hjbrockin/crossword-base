@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dynamic Crossword Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#fd7e83',
+                        primaryDark: '#e56b70',
+                        primaryLight: '#ff9a9e',
+                        bgLight: '#fff5f5',
+                        gridBg: '#111827',
+                        cellEmpty: '#ffffff',
+                        cellFilled: '#f3f4f6',
+                        cellActive: '#ffebec',
+                        cellHighlight: '#ffcdd0',
+                    },
+                    fontFamily: {
+                        sans: ['Poppins', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #fff5f5;
+            color: #1f2937;
+            overscroll-behavior: none; /* Prevent bounce on mobile */
+        }
+        
+        /* Custom scrollbar for clues */
+        .clue-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .clue-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        .clue-scroll::-webkit-scrollbar-thumb {
+            background: #fd7e83;
+            border-radius: 4px;
+        }
+
+        /* Grid specific styles */
+        #crossword-grid, #editor-crossword-grid {
+            display: grid;
+            gap: 1px;
+            background-color: #111827;
+            border: 2px solid #111827;
+            box-shadow: 0 10px 25px -5px rgba(253, 126, 131, 0.3);
+            width: fit-content;
+            margin: 0 auto;
+        }
+
+        .cell {
+            width: 32px;
+            height: 32px;
+            background-color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: 600;
+            font-size: 1.1rem;
+            text-transform: uppercase;
+            position: relative;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.1s;
+        }
+
+        @media (min-width: 640px) {
+            .cell {
+                width: 40px;
+                height: 40px;
+                font-size: 1.3rem;
+            }
+        }
+
+        .cell.block {
+            background-color: #111827;
+            cursor: default;
+        }
+
+        .cell .number {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            font-size: 0.55rem;
+            font-weight: 400;
+            line-height: 1;
+            color: #4b5563;
+        }
+
+        .cell.active-cell {
+            background-color: #ffcdd0; /* Highlighted cell */
+        }
+
+        .cell.active-word {
+            background-color: #ffebec; /* Highlighted word */
+        }
+
+        .cell.correct {
+            color: #059669; /* Green text for correct */
+        }
+        
+        .cell.wrong {
+            color: #dc2626; /* Red text for wrong */
+        }
+
+        /* Hide input used for mobile keyboard */
+        #hidden-input {
+            position: absolute;
+            opacity: 0;
+            top: -1000px;
+            left: -1000px;
+        }
+
+        /* Animations */
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .pop-anim {
+            animation: pop 0.2s ease-in-out;
+        }
+        
+        /* Modal Base */
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <header class="bg-primary text-white p-4 shadow-md sticky top-0 z-10">
+        <div class="container mx-auto flex justify-between items-center max-w-5xl">
+            <h1 class="text-2xl font-extrabold tracking-tight cursor-pointer" onclick="location.reload()">
+                Crosspuzzle
+            </h1>
+            <button id="editor-btn" class="bg-white text-primary px-4 py-2 rounded-full font-bold text-sm hover:bg-gray-100 transition shadow-sm" onclick="showAuthModal()">
+                Editor Access
+            </button>
+            <button id="player-btn" class="hidden bg-white text-primary px-4 py-2 rounded-full font-bold text-sm hover:bg-gray-100 transition shadow-sm" onclick="switchToPlayerMode()">
+                Exit Editor
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto p-4 max-w-5xl flex flex-col md:flex-row gap-6 items-start">
+        
+        <!-- PLAYER VIEW -->
+        <div id="player-view" class="w-full flex flex-col md:flex-row gap-6 w-full">
+            
+            <!-- Left: Grid Area -->
+            <div class="w-full md:w-3/5 flex flex-col items-center">
+                <div class="bg-white p-4 sm:p-6 rounded-2xl shadow-lg border border-gray-100 w-full overflow-x-auto flex flex-col justify-center items-center min-h-[300px] relative">
+                    
+                    <!-- Zoom Controls (Player) -->
+                    <div class="absolute top-4 right-4 flex flex-col gap-2 z-10">
+                        <button onclick="zoomGrid(1)" class="bg-white border border-gray-200 text-gray-700 w-8 h-8 rounded-full shadow-sm hover:bg-gray-100 flex items-center justify-center font-bold text-xl leading-none" title="Zoom In">+</button>
+                        <button onclick="zoomGrid(-1)" class="bg-white border border-gray-200 text-gray-700 w-8 h-8 rounded-full shadow-sm hover:bg-gray-100 flex items-center justify-center font-bold text-xl leading-none" title="Zoom Out">-</button>
+                    </div>
+
+                    <div id="grid-container" class="relative">
+                        <!-- Crossword Grid will be injected here -->
+                        <div id="crossword-grid"></div>
+                        <!-- Hidden input for capturing mobile keyboard events -->
+                        <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+                    </div>
+                </div>
+                
+                <!-- Active Clue Display (Mobile Friendly) -->
+                <div class="mt-4 bg-primary text-white p-3 rounded-xl shadow-md w-full text-center font-semibold text-lg hidden" id="active-clue-display">
+                    Select a square to start!
+                </div>
+                
+                <!-- Game Controls -->
+                <div class="mt-4 flex gap-2 w-full justify-center flex-wrap">
+                    <button onclick="checkAnswers()" class="bg-gray-800 text-white px-6 py-2 rounded-full font-semibold hover:bg-gray-700 transition">Check</button>
+                    <button onclick="revealLetter()" class="bg-primaryLight text-gray-800 px-4 py-2 rounded-full font-semibold hover:bg-primary transition">Reveal Letter</button>
+                    <button onclick="clearGrid()" class="bg-gray-200 text-gray-800 px-4 py-2 rounded-full font-semibold hover:bg-gray-300 transition">Clear</button>
+                </div>
+            </div>
+
+            <!-- Right: Clues Area -->
+            <div class="w-full md:w-2/5 flex flex-col gap-4">
+                <div class="bg-white p-5 rounded-2xl shadow-lg border border-gray-100 h-[40vh] md:h-[60vh] flex flex-col">
+                    <h2 class="text-xl font-bold mb-3 text-primary border-b-2 border-primaryLight pb-2">Across</h2>
+                    <div class="overflow-y-auto clue-scroll flex-grow pr-2" id="clues-across">
+                        <!-- Across clues injected here -->
+                    </div>
+                </div>
+                
+                <div class="bg-white p-5 rounded-2xl shadow-lg border border-gray-100 h-[40vh] md:h-[60vh] flex flex-col">
+                    <h2 class="text-xl font-bold mb-3 text-primary border-b-2 border-primaryLight pb-2">Down</h2>
+                    <div class="overflow-y-auto clue-scroll flex-grow pr-2" id="clues-down">
+                        <!-- Down clues injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- EDITOR VIEW (Hidden by default) -->
+        <div id="editor-view" class="hidden w-full flex flex-col gap-6">
+            <div class="bg-white p-6 rounded-2xl shadow-lg border-t-4 border-primary">
+                <h2 class="text-2xl font-bold mb-4 text-gray-800">Crossword Generator</h2>
+                <p class="text-gray-600 mb-6 text-sm">Add words and their corresponding clues. The system will automatically build a 15x15 grid. You can also drag words onto the preview grid to place them manually.</p>
+                
+                <!-- Input Form -->
+                <div class="flex flex-col md:flex-row gap-4 mb-6">
+                    <div class="flex-grow">
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">Answer Word</label>
+                        <input type="text" id="editor-word" class="w-full p-3 border rounded-xl focus:ring-2 focus:ring-primary outline-none uppercase" placeholder="e.g., DYNAMIC">
+                    </div>
+                    <div class="flex-grow md:w-1/2">
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">Clue</label>
+                        <input type="text" id="editor-clue" class="w-full p-3 border rounded-xl focus:ring-2 focus:ring-primary outline-none" placeholder="e.g., Characterized by constant change">
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="addWordToPool()" class="w-full md:w-auto bg-primary text-white px-6 py-3 rounded-xl font-bold hover:bg-primaryDark transition shadow-md">Add Word</button>
+                    </div>
+                </div>
+
+                <!-- Error Messages -->
+                <div id="editor-message" class="hidden p-4 mb-6 rounded-xl text-sm font-semibold"></div>
+
+                <!-- Word Pool List & Manual Layout -->
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-bold text-lg">Word Pool & Layout <span id="word-count" class="text-gray-500 text-sm font-normal">(0 words)</span></h3>
+                    <button onclick="toggleLayoutEdit()" id="toggle-layout-btn" class="text-sm text-primary font-semibold hover:underline hidden">Edit Placements</button>
+                </div>
+                <div class="bg-gray-50 rounded-xl p-4 min-h-[150px] max-h-[400px] overflow-y-auto border border-gray-200 mb-6" id="word-pool-list">
+                    <p class="text-gray-400 italic text-center mt-8">No words added yet.</p>
+                </div>
+
+                <!-- Generator Controls -->
+                <div class="flex flex-wrap gap-4 border-t pt-6">
+                    <button onclick="generateCrossword()" class="bg-gray-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-gray-700 transition flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                        </svg>
+                        Generate Puzzle
+                    </button>
+                    <button onclick="clearWordPool()" class="bg-red-100 text-red-600 px-6 py-3 rounded-xl font-bold hover:bg-red-200 transition">Clear All</button>
+                </div>
+                
+                <!-- Change Password Section -->
+                <div class="mt-8 pt-6 border-t border-gray-200 flex justify-end">
+                    <button onclick="showChangePasswordModal()" class="text-gray-500 hover:text-primary text-sm font-semibold transition flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                        </svg>
+                        Change Password
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Editor Preview Area -->
+            <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 relative">
+                <h3 class="font-bold text-lg mb-4">Generated Preview</h3>
+                <p class="text-xs text-gray-500 mb-2">Drag the handle <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg> from a word above and drop it onto the grid to place it manually.</p>
+                
+                <!-- Zoom Controls (Editor) -->
+                <div class="absolute top-6 right-6 flex flex-col gap-2 z-10">
+                    <button onclick="zoomGrid(1)" class="bg-white border border-gray-200 text-gray-700 w-8 h-8 rounded-full shadow-sm hover:bg-gray-100 flex items-center justify-center font-bold text-xl leading-none" title="Zoom In">+</button>
+                    <button onclick="zoomGrid(-1)" class="bg-white border border-gray-200 text-gray-700 w-8 h-8 rounded-full shadow-sm hover:bg-gray-100 flex items-center justify-center font-bold text-xl leading-none" title="Zoom Out">-</button>
+                </div>
+
+                <div class="overflow-x-auto flex justify-center bg-gray-50 p-4 rounded-xl border border-gray-200 min-h-[400px]" id="editor-grid-preview">
+                    <!-- The 15x15 preview grid will ALWAYS be here -->
+                    <div id="editor-crossword-grid"></div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="fixed inset-0 modal-overlay z-50 hidden flex justify-center items-center">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-sm w-full mx-4 transform transition-all scale-95 opacity-0" id="auth-modal-content">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-gray-800">Editor Access</h3>
+                <button onclick="closeAuthModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">Enter password to access puzzle creator.</p>
+            <input type="password" id="auth-password" class="w-full p-3 border rounded-xl mb-4 focus:ring-2 focus:ring-primary outline-none" placeholder="Password">
+            <div id="auth-error" class="text-red-500 text-sm mb-4 hidden">Incorrect password.</div>
+            <button onclick="verifyPassword()" class="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primaryDark transition">Login</button>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="change-pwd-modal" class="fixed inset-0 modal-overlay z-50 hidden flex justify-center items-center">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-sm w-full mx-4 transform transition-all scale-95 opacity-0" id="change-pwd-modal-content">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-gray-800">Change Password</h3>
+                <button onclick="closeChangePasswordModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <input type="password" id="current-password" class="w-full p-3 border rounded-xl mb-3 focus:ring-2 focus:ring-primary outline-none" placeholder="Current Password">
+            <input type="password" id="new-password" class="w-full p-3 border rounded-xl mb-4 focus:ring-2 focus:ring-primary outline-none" placeholder="New Password">
+            <div id="change-pwd-error" class="text-red-500 text-sm mb-4 hidden"></div>
+            <button onclick="submitChangePassword()" class="w-full bg-primary text-white py-3 rounded-xl font-bold hover:bg-primaryDark transition">Update Password</button>
+        </div>
+    </div>
+
+    <!-- Alert Modal (replaces native alert) -->
+    <div id="alert-modal" class="fixed inset-0 modal-overlay z-50 hidden flex justify-center items-center">
+        <div class="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 text-center">
+            <h3 class="text-xl font-bold text-gray-800 mb-2" id="alert-title">Notice</h3>
+            <p class="text-gray-600 mb-6" id="alert-message">Message here</p>
+            <button onclick="closeAlert()" class="bg-primary text-white px-6 py-2 rounded-full font-bold hover:bg-primaryDark transition">OK</button>
+        </div>
+    </div>
+
+    <script>
+        const state = {
+            mode: 'player', // 'player' or 'editor'
+            password: 'pay4gAy%', // Exact match required
+            isEditingLayout: false,
+            cellSize: 40, // Add explicit zoom scale state
+            wordPool: [
+                { word: "PONDER", clue: "To think about something carefully", manualPlacement: null },
+                { word: "CLUB", clue: "An association dedicated to a particular interest", manualPlacement: null },
+                { word: "DYNAMIC", clue: "Characterized by constant change, activity, or progress", manualPlacement: null },
+                { word: "YOUTH", clue: "The period between childhood and adult age", manualPlacement: null },
+                { word: "PUZZLE", clue: "A game designed to test ingenuity or knowledge", manualPlacement: null },
+                { word: "HTML", clue: "Standard markup language for documents designed to be displayed in a web browser", manualPlacement: null },
+                { word: "DESIGN", clue: "A plan or drawing produced to show the look and function of a building, garment, or other object before it is built or made", manualPlacement: null }
+            ],
+            gridData: null, 
+            playerState: {
+                grid: [], // The current letters typed by user
+                activeRow: -1,
+                activeCol: -1,
+                direction: 'across', // 'across' or 'down'
+                activeClueId: null
+            },
+            checkStatus: false
+        };
+
+        const DOM = {
+            playerView: document.getElementById('player-view'),
+            editorView: document.getElementById('editor-view'),
+            editorBtn: document.getElementById('editor-btn'),
+            playerBtn: document.getElementById('player-btn'),
+            gridContainer: document.getElementById('crossword-grid'),
+            cluesAcross: document.getElementById('clues-across'),
+            cluesDown: document.getElementById('clues-down'),
+            hiddenInput: document.getElementById('hidden-input'),
+            activeClueDisplay: document.getElementById('active-clue-display'),
+            wordPoolList: document.getElementById('word-pool-list'),
+            editorWord: document.getElementById('editor-word'),
+            editorClue: document.getElementById('editor-clue'),
+            editorMsg: document.getElementById('editor-message'),
+            wordCount: document.getElementById('word-count')
+        };
+
+        function init() {
+            if (state.wordPool.length > 0) {
+                generateCrosswordInternal(state.wordPool);
+            }
+            setupEventListeners();
+        }
+
+        function generateCrosswordInternal(wordsList) {
+            if (wordsList.length === 0) return null;
+            const MAX_SIZE = 15;
+
+            let manualWords = [];
+            let autoWords = [];
+            
+            JSON.parse(JSON.stringify(wordsList)).forEach(w => {
+                if (w.manualPlacement && w.manualPlacement.r !== null && w.manualPlacement.c !== null && w.manualPlacement.dir) {
+                    manualWords.push(w);
+                } else {
+                    autoWords.push(w);
+                }
+            });
+
+            autoWords.sort((a, b) => b.word.length - a.word.length);
+            
+            let gridMap = new Map(); 
+            let placedWordsInfo = []; 
+            let unplacedWords = [];
+            let startId = 1;
+
+            for (let w of manualWords) {
+                let p = w.manualPlacement;
+                if (isValidPlacement(w.word, p.r, p.c, p.dir, gridMap)) {
+                    for (let i = 0; i < w.word.length; i++) {
+                        let r = p.dir === 'across' ? p.r : p.r + i;
+                        let c = p.dir === 'across' ? p.c + i : p.c;
+                        gridMap.set(`${r},${c}`, { letter: w.word[i] });
+                    }
+                    placedWordsInfo.push({
+                        id: startId++, word: w.word, clue: w.clue, r: p.r, c: p.c, dir: p.dir, isManual: true
+                    });
+                } else {
+                    unplacedWords.push(w);
+                }
+            }
+
+            if (placedWordsInfo.length === 0 && autoWords.length > 0) {
+                let firstWord = autoWords.shift();
+                if (firstWord.word.length <= MAX_SIZE) {
+                    let startR = Math.floor(MAX_SIZE / 2);
+                    let startC = Math.floor((MAX_SIZE - firstWord.word.length) / 2);
+                    
+                    if (isValidPlacement(firstWord.word, startR, startC, 'across', gridMap)) {
+                        for (let i = 0; i < firstWord.word.length; i++) {
+                            gridMap.set(`${startR},${startC + i}`, { letter: firstWord.word[i] });
+                        }
+                        placedWordsInfo.push({
+                            id: startId++, word: firstWord.word, clue: firstWord.clue, r: startR, c: startC, dir: 'across'
+                        });
+                    } else {
+                        unplacedWords.push(firstWord); 
+                    }
+                } else {
+                    unplacedWords.push(firstWord);
+                }
+            }
+
+            for (let wordObj of autoWords) {
+                let wordStr = wordObj.word;
+                let bestPlacement = null;
+                let minScore = Infinity; 
+
+                for (let i = 0; i < wordStr.length; i++) {
+                    let letterToMatch = wordStr[i];
+                    
+                    for (let [coord, cellData] of gridMap.entries()) {
+                        if (cellData.letter === letterToMatch) {
+                            let [gridR, gridC] = coord.split(',').map(Number);
+
+                            let tryR_across = gridR;
+                            let tryC_across = gridC - i;
+                            if (isValidPlacement(wordStr, tryR_across, tryC_across, 'across', gridMap)) {
+                                let score = evaluatePlacement(wordStr, tryR_across, tryC_across, 'across', gridMap);
+                                if (score < minScore) {
+                                    minScore = score; bestPlacement = { r: tryR_across, c: tryC_across, dir: 'across' };
+                                }
+                            }
+
+                            let tryR_down = gridR - i;
+                            let tryC_down = gridC;
+                            if (isValidPlacement(wordStr, tryR_down, tryC_down, 'down', gridMap)) {
+                                let score = evaluatePlacement(wordStr, tryR_down, tryC_down, 'down', gridMap);
+                                if (score < minScore) {
+                                    minScore = score; bestPlacement = { r: tryR_down, c: tryC_down, dir: 'down' };
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (bestPlacement) {
+                    for (let i = 0; i < wordStr.length; i++) {
+                        let r = bestPlacement.dir === 'across' ? bestPlacement.r : bestPlacement.r + i;
+                        let c = bestPlacement.dir === 'across' ? bestPlacement.c + i : bestPlacement.c;
+                        gridMap.set(`${r},${c}`, { letter: wordStr[i] });
+                    }
+                    placedWordsInfo.push({
+                        id: startId++, word: wordStr, clue: wordObj.clue, r: bestPlacement.r, c: bestPlacement.c, dir: bestPlacement.dir
+                    });
+                } else {
+                    unplacedWords.push(wordObj);
+                }
+            }
+
+            let finalGrid = Array(MAX_SIZE).fill(null).map(() => Array(MAX_SIZE).fill(null));
+            let cellStarts = new Map(); 
+            
+            state.wordPool.forEach(w => w.currentPlacement = null);
+
+            placedWordsInfo.forEach(pw => {
+                let poolWord = state.wordPool.find(w => w.word === pw.word);
+                if (poolWord) poolWord.currentPlacement = { r: pw.r, c: pw.c, dir: pw.dir };
+
+                let key = `${pw.r},${pw.c}`;
+                if (!cellStarts.has(key)) cellStarts.set(key, { r: pw.r, c: pw.c, across: null, down: null, num: 0 });
+                cellStarts.get(key)[pw.dir] = pw;
+            });
+
+            let startCellsList = Array.from(cellStarts.values()).sort((a, b) => {
+                if (a.r !== b.r) return a.r - b.r;
+                return a.c - b.c;
+            });
+
+            let currentNum = 1;
+            let finalClues = { across: [], down: [] };
+
+            startCellsList.forEach(cell => {
+                cell.num = currentNum++;
+                if (cell.across) { cell.across.num = cell.num; finalClues.across.push(cell.across); }
+                if (cell.down) { cell.down.num = cell.num; finalClues.down.push(cell.down); }
+            });
+
+            for (let [coord, data] of gridMap.entries()) {
+                let [r, c] = coord.split(',').map(Number);
+                let num = cellStarts.has(`${r},${c}`) ? cellStarts.get(`${r},${c}`).num : null;
+                finalGrid[r][c] = { letter: data.letter, number: num };
+            }
+
+            state.gridData = {
+                grid: finalGrid, rows: MAX_SIZE, cols: MAX_SIZE, clues: finalClues
+            };
+
+            state.playerState.grid = Array(MAX_SIZE).fill(null).map(() => Array(MAX_SIZE).fill(''));
+            state.playerState.activeRow = -1;
+            state.playerState.activeCol = -1;
+            state.playerState.activeClueId = null;
+
+            renderGrid();
+            renderClues();
+            if (state.mode === 'editor') renderWordPool(); 
+
+            return unplacedWords;
+        }
+
+        function isValidPlacement(word, startR, startC, dir, gridMap) {
+            for (let i = 0; i < word.length; i++) {
+                let r = dir === 'across' ? startR : startR + i;
+                let c = dir === 'across' ? startC + i : startC;
+                
+                if (r < 0 || r >= 15 || c < 0 || c >= 15) return false; 
+                
+                let coord = `${r},${c}`;
+                if (gridMap.has(coord) && gridMap.get(coord).letter !== word[i]) return false;
+
+                if (!gridMap.has(coord)) {
+                    if (dir === 'across') {
+                        if (r > 0 && gridMap.has(`${r-1},${c}`)) return false;
+                        if (r < 14 && gridMap.has(`${r+1},${c}`)) return false;
+                    } else {
+                        if (c > 0 && gridMap.has(`${r},${c-1}`)) return false;
+                        if (c < 14 && gridMap.has(`${r},${c+1}`)) return false;
+                    }
+                }
+            }
+
+            let rBefore = dir === 'across' ? startR : startR - 1;
+            let cBefore = dir === 'across' ? startC - 1 : startC;
+            if (rBefore >= 0 && cBefore >= 0 && rBefore < 15 && cBefore < 15 && gridMap.has(`${rBefore},${cBefore}`)) return false;
+
+            let rAfter = dir === 'across' ? startR : startR + word.length;
+            let cAfter = dir === 'across' ? startC + word.length : startC;
+            if (rAfter >= 0 && cAfter >= 0 && rAfter < 15 && cAfter < 15 && gridMap.has(`${rAfter},${cAfter}`)) return false;
+
+            return true;
+        }
+
+        function evaluatePlacement(word, startR, startC, dir, gridMap) {
+            return Math.abs(startR - 7) + Math.abs(startC - 7);
+        }
+
+        function zoomGrid(direction) {
+            state.cellSize += (direction * 5);
+            if (state.cellSize < 20) state.cellSize = 20;
+            if (state.cellSize > 80) state.cellSize = 80;
+            renderGrid();
+        }
+
+        function renderGrid() {
+            if (!state.gridData) {
+                // Initialize an empty 15x15 preview if no data
+                const editorGrid = document.getElementById('editor-crossword-grid');
+                if (editorGrid && state.mode === 'editor') {
+                    document.documentElement.style.setProperty('--cell-size', `${state.cellSize}px`);
+                    document.documentElement.style.setProperty('--cell-font-size', `${state.cellSize * 0.55}px`);
+                    let emptyHTML = '';
+                    for (let r = 0; r < 15; r++) {
+                        for (let c = 0; c < 15; c++) {
+                            emptyHTML += `<div class="cell block" ondragover="event.preventDefault()" ondrop="dropWord(event, ${r}, ${c})" style="width: var(--cell-size); height: var(--cell-size); font-size: var(--cell-font-size);"></div>`;
+                        }
+                    }
+                    editorGrid.style.gridTemplateRows = `repeat(15, 1fr)`;
+                    editorGrid.style.gridTemplateColumns = `repeat(15, 1fr)`;
+                    editorGrid.innerHTML = emptyHTML;
+                }
+                return;
+            }
+
+            const { grid, rows, cols } = state.gridData;
+
+            document.documentElement.style.setProperty('--cell-size', `${state.cellSize}px`);
+            document.documentElement.style.setProperty('--cell-font-size', `${state.cellSize * 0.55}px`);
+
+            const style = document.createElement('style');
+            style.innerHTML = `
+                .cell {
+                    width: var(--cell-size);
+                    height: var(--cell-size);
+                    font-size: var(--cell-font-size);
+                }
+            `;
+            const oldStyle = document.getElementById('dynamic-grid-styles');
+            if (oldStyle) oldStyle.remove();
+            style.id = 'dynamic-grid-styles';
+            document.head.appendChild(style);
+
+            let activeCells = getActiveWordCells();
+            
+            // 1. Render Player View
+            if (DOM.gridContainer) {
+                let gridHTML = '';
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        const cellData = grid[r][c];
+                        if (cellData === null) {
+                            gridHTML += `<div class="cell block"></div>`;
+                        } else {
+                            const isFocus = (r === state.playerState.activeRow && c === state.playerState.activeCol);
+                            const isInWord = activeCells.some(ac => ac.r === r && ac.c === c);
+                            const playerLetter = state.playerState.grid[r][c] || '';
+                            
+                            let classes = ['cell'];
+                            if (isFocus) classes.push('active-cell', 'pop-anim');
+                            else if (isInWord) classes.push('active-word');
+                            
+                            if (playerLetter && cellData.letter === playerLetter && state.checkStatus) {
+                                classes.push('correct');
+                            } else if (playerLetter && state.checkStatus) {
+                                classes.push('wrong');
+                            }
+
+                            gridHTML += `<div class="${classes.join(' ')}" onclick="handleCellClick(${r}, ${c})">
+                                ${cellData.number ? `<span class="number">${cellData.number}</span>` : ''}
+                                <span class="letter-value font-bold">${playerLetter}</span>
+                            </div>`;
+                        }
+                    }
+                }
+                DOM.gridContainer.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+                DOM.gridContainer.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+                DOM.gridContainer.innerHTML = gridHTML;
+            }
+
+            // 2. Render Editor View (Strictly 15x15 Drop Zones)
+            const editorGrid = document.getElementById('editor-crossword-grid');
+            if (editorGrid && state.mode === 'editor') {
+                let editorGridHTML = '';
+                for (let r = 0; r < 15; r++) {
+                    for (let c = 0; c < 15; c++) {
+                        // Because generator returns 15x15, we iterate through it directly
+                        const cellData = r < rows && c < cols ? grid[r][c] : null; 
+                        
+                        if (cellData === null) {
+                            editorGridHTML += `<div class="cell block" ondragover="event.preventDefault()" ondrop="dropWord(event, ${r}, ${c})"></div>`;
+                        } else {
+                            editorGridHTML += `<div class="cell bg-white text-gray-900 border border-gray-300" ondragover="event.preventDefault()" ondrop="dropWord(event, ${r}, ${c})">
+                                ${cellData.number ? `<span class="number">${cellData.number}</span>` : ''}
+                                <span class="letter-value font-bold" style="font-size: 0.9em;">${cellData.letter}</span>
+                            </div>`;
+                        }
+                    }
+                }
+                
+                editorGrid.style.gridTemplateRows = `repeat(15, 1fr)`;
+                editorGrid.style.gridTemplateColumns = `repeat(15, 1fr)`;
+                editorGrid.innerHTML = editorGridHTML;
+            }
+        }
+
+        function renderClues() {
+            if (!state.gridData) {
+                DOM.cluesAcross.innerHTML = '';
+                DOM.cluesDown.innerHTML = '';
+                return;
+            }
+            const { clues } = state.gridData;
+
+            const createClueHTML = (clueObj) => `
+                <div class="cursor-pointer hover:bg-primaryLight hover:text-white p-3 rounded-xl transition ${state.playerState.activeClueId === clueObj.id ? 'bg-primary text-white shadow-md' : 'text-gray-700 hover:bg-gray-50'}" 
+                     onclick="selectClue(${clueObj.num}, '${clueObj.dir}')"
+                     id="clue-${clueObj.dir}-${clueObj.num}">
+                    <span class="font-bold mr-2">${clueObj.num}.</span> ${clueObj.clue}
+                </div>
+            `;
+
+            DOM.cluesAcross.innerHTML = clues.across.map(createClueHTML).join('');
+            DOM.cluesDown.innerHTML = clues.down.map(createClueHTML).join('');
+        }
+
+        function getActiveWordCells() {
+            if (state.playerState.activeRow === -1) return [];
+            let r = state.playerState.activeRow;
+            let c = state.playerState.activeCol;
+            let cells = [];
+            let dir = state.playerState.direction;
+            let grid = state.gridData.grid;
+            
+            let currR = r, currC = c;
+            while(currR >= 0 && currC >= 0 && grid[currR][currC] !== null) {
+                cells.unshift({r: currR, c: currC});
+                if (dir === 'across') currC--; else currR--;
+            }
+            currR = r; currC = c;
+            if (dir === 'across') currC++; else currR++;
+            while(currR < state.gridData.rows && currC < state.gridData.cols && grid[currR][currC] !== null) {
+                cells.push({r: currR, c: currC});
+                if (dir === 'across') currC++; else currR++;
+            }
+            return cells;
+        }
+
+        function handleCellClick(r, c) {
+            state.checkStatus = false; 
+            if (state.playerState.activeRow === r && state.playerState.activeCol === c) {
+                state.playerState.direction = state.playerState.direction === 'across' ? 'down' : 'across';
+            } else {
+                state.playerState.activeRow = r;
+                state.playerState.activeCol = c;
+                let grid = state.gridData.grid;
+                if (state.playerState.direction === 'across' && 
+                   (c === 0 || grid[r][c-1] === null) && 
+                   (c === state.gridData.cols-1 || grid[r][c+1] === null)) {
+                    state.playerState.direction = 'down';
+                } else if (state.playerState.direction === 'down' && 
+                   (r === 0 || grid[r-1][c] === null) && 
+                   (r === state.gridData.rows-1 || grid[r+1][c] === null)) {
+                    state.playerState.direction = 'across';
+                }
+            }
+            updateActiveClue();
+            renderGrid();
+            renderClues();
+            DOM.hiddenInput.focus();
+        }
+
+        function selectClue(num, dir) {
+            state.checkStatus = false;
+            let clue = state.gridData.clues[dir].find(c => c.num === num);
+            if (clue) {
+                state.playerState.direction = dir;
+                state.playerState.activeRow = clue.r;
+                state.playerState.activeCol = clue.c;
+                updateActiveClue();
+                renderGrid();
+                renderClues();
+                DOM.hiddenInput.focus();
+            }
+        }
+
+        function updateActiveClue() {
+            let dir = state.playerState.direction;
+            let activeCells = getActiveWordCells();
+            
+            if (activeCells.length === 0) return;
+            
+            let firstCell = activeCells[0];
+            let num = state.gridData.grid[firstCell.r][firstCell.c].number;
+            
+            let clue = state.gridData.clues[dir].find(cl => cl.num === num);
+            if (clue) {
+                state.playerState.activeClueId = clue.id;
+                DOM.activeClueDisplay.classList.remove('hidden');
+                DOM.activeClueDisplay.textContent = `${num} ${dir.toUpperCase()}: ${clue.clue}`;
+                
+                let el = document.getElementById(`clue-${dir}-${num}`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function typeLetter(char) {
+            let r = state.playerState.activeRow;
+            let c = state.playerState.activeCol;
+            if (r === -1) return;
+            
+            state.playerState.grid[r][c] = char.toUpperCase();
+            state.checkStatus = false;
+            advanceCursor();
+            renderGrid();
+        }
+
+        function handleBackspace() {
+            let r = state.playerState.activeRow;
+            let c = state.playerState.activeCol;
+            if (r === -1) return;
+            state.checkStatus = false;
+
+            if (state.playerState.grid[r][c] !== '') {
+                state.playerState.grid[r][c] = '';
+            } else {
+                retreatCursor();
+                r = state.playerState.activeRow;
+                c = state.playerState.activeCol;
+                state.playerState.grid[r][c] = '';
+            }
+            renderGrid();
+        }
+
+        function advanceCursor() {
+            let r = state.playerState.activeRow;
+            let c = state.playerState.activeCol;
+            let dir = state.playerState.direction;
+            let grid = state.gridData.grid;
+
+            let nextR = r;
+            let nextC = c;
+            if (dir === 'across') nextC++; else nextR++;
+
+            if (nextR < state.gridData.rows && nextC < state.gridData.cols && grid[nextR][nextC] !== null) {
+                state.playerState.activeRow = nextR;
+                state.playerState.activeCol = nextC;
+            } else {
+                jumpToNextWord();
+            }
+        }
+
+        function retreatCursor() {
+            let r = state.playerState.activeRow;
+            let c = state.playerState.activeCol;
+            let dir = state.playerState.direction;
+            let grid = state.gridData.grid;
+
+            let nextR = r;
+            let nextC = c;
+            if (dir === 'across') nextC--; else nextR--;
+
+            if (nextR >= 0 && nextC >= 0 && grid[nextR][nextC] !== null) {
+                state.playerState.activeRow = nextR;
+                state.playerState.activeCol = nextC;
+            }
+        }
+
+        function jumpToNextWord() {
+            let dir = state.playerState.direction;
+            let clues = state.gridData.clues[dir];
+            let currentClueIdx = clues.findIndex(clue => clue.id === state.playerState.activeClueId);
+            
+            if (currentClueIdx !== -1 && currentClueIdx + 1 < clues.length) {
+                let nextClue = clues[currentClueIdx + 1];
+                selectClue(nextClue.num, nextClue.dir);
+            } else {
+                let otherDir = dir === 'across' ? 'down' : 'across';
+                let otherClues = state.gridData.clues[otherDir];
+                if (otherClues.length > 0) {
+                    selectClue(otherClues[0].num, otherDir);
+                }
+            }
+        }
+
+        function checkAnswers() {
+            let allCorrect = true;
+            let allFilled = true;
+            let hasErrors = false;
+
+            const { grid, rows, cols } = state.gridData;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (grid[r][c] !== null) {
+                        const playerLetter = state.playerState.grid[r][c];
+                        const correctLetter = grid[r][c].letter;
+
+                        if (!playerLetter) {
+                            allFilled = false;
+                        } else if (playerLetter !== correctLetter) {
+                            allCorrect = false;
+                            hasErrors = true;
+                        }
+                    }
+                }
+            }
+
+            state.checkStatus = true; 
+            renderGrid();
+
+            setTimeout(() => {
+                if (allFilled && allCorrect) {
+                    showAlert("Congratulations!", "You have solved the puzzle completely!");
+                } else if (hasErrors) {
+                    showAlert("Check Answers", "Some answers are incorrect. Keep trying!");
+                } else {
+                    showAlert("Keep Going", "No errors found so far, but the puzzle is incomplete.");
+                }
+            }, 100);
+        }
+
+        function revealLetter() {
+            const { activeRow: r, activeCol: c } = state.playerState;
+            if (r === -1 || c === -1) return;
+            
+            const correctLetter = state.gridData.grid[r][c].letter;
+            typeLetter(correctLetter);
+        }
+
+        function clearGrid() {
+            const { rows, cols, grid } = state.gridData;
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (grid[r][c] !== null) {
+                        state.playerState.grid[r][c] = '';
+                    }
+                }
+            }
+            state.checkStatus = false;
+            renderGrid();
+        }
+
+        function showAuthModal() {
+            const modal = document.getElementById('auth-modal');
+            const content = document.getElementById('auth-modal-content');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+            document.getElementById('auth-password').focus();
+        }
+        
+        function verifyPassword() {
+            const input = document.getElementById('auth-password').value;
+            if (String(input) === String(state.password)) {
+                closeAuthModal();
+                switchToEditorMode();
+            } else {
+                document.getElementById('auth-error').classList.remove('hidden');
+                document.getElementById('auth-error').textContent = 'Incorrect password. Access denied.';
+            }
+        }
+
+        function closeAuthModal() {
+            const modal = document.getElementById('auth-modal');
+            const content = document.getElementById('auth-modal-content');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                document.getElementById('auth-error').classList.add('hidden');
+                document.getElementById('auth-password').value = '';
+            }, 200);
+        }
+
+        function showChangePasswordModal() {
+            const modal = document.getElementById('change-pwd-modal');
+            const content = document.getElementById('change-pwd-modal-content');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+            document.getElementById('current-password').focus();
+            document.getElementById('change-pwd-error').classList.add('hidden');
+        }
+
+        function closeChangePasswordModal() {
+            const modal = document.getElementById('change-pwd-modal');
+            const content = document.getElementById('change-pwd-modal-content');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                document.getElementById('current-password').value = '';
+                document.getElementById('new-password').value = '';
+            }, 200);
+        }
+
+        function submitChangePassword() {
+            const curr = document.getElementById('current-password').value;
+            const newPwd = document.getElementById('new-password').value;
+            const errDiv = document.getElementById('change-pwd-error');
+            
+            if (String(curr) !== String(state.password)) {
+                errDiv.textContent = "Current password is incorrect.";
+                errDiv.classList.remove('hidden');
+                return;
+            }
+            if (!newPwd || newPwd.length < 4) {
+                errDiv.textContent = "New password must be at least 4 characters.";
+                errDiv.classList.remove('hidden');
+                return;
+            }
+            
+            state.password = newPwd;
+            closeChangePasswordModal();
+            showEditorMessage('Password updated successfully.', 'success');
+        }
+
+        function switchToEditorMode() {
+            state.mode = 'editor';
+            DOM.playerView.classList.add('hidden');
+            DOM.editorView.classList.remove('hidden');
+            DOM.editorBtn.classList.add('hidden');
+            DOM.playerBtn.classList.remove('hidden');
+            renderWordPool();
+            renderGrid(); // Ensure preview renders
+        }
+
+        function switchToPlayerMode() {
+            state.mode = 'player';
+            DOM.editorView.classList.add('hidden');
+            DOM.playerView.classList.remove('hidden');
+            DOM.playerBtn.classList.add('hidden');
+            DOM.editorBtn.classList.remove('hidden');
+            
+            if (state.gridData) {
+                renderGrid();
+                renderClues();
+            }
+        }
+
+        function addWordToPool() {
+            const wordInput = DOM.editorWord.value.trim().toUpperCase();
+            const clueInput = DOM.editorClue.value.trim();
+
+            if (!wordInput || !clueInput) {
+                showEditorMessage('Please enter both a word and a clue.', 'error');
+                return;
+            }
+
+            if (!/^[A-Z]+$/.test(wordInput)) {
+                showEditorMessage('Word must contain only letters (no spaces or numbers).', 'error');
+                return;
+            }
+            
+            if (wordInput.length > 15) {
+                showEditorMessage('Word exceeds maximum grid size of 15 letters.', 'error');
+                return;
+            }
+
+            if (state.wordPool.some(item => item.word === wordInput)) {
+                showEditorMessage('This word is already in the pool.', 'error');
+                return;
+            }
+
+            state.wordPool.push({ word: wordInput, clue: clueInput, manualPlacement: null });
+            DOM.editorWord.value = '';
+            DOM.editorClue.value = '';
+            DOM.editorWord.focus();
+            
+            renderWordPool();
+            showEditorMessage('Word added!', 'success');
+        }
+
+        function toggleLayoutEdit() {
+            state.isEditingLayout = !state.isEditingLayout;
+            const btn = document.getElementById('toggle-layout-btn');
+            btn.textContent = state.isEditingLayout ? 'Done Editing' : 'Edit Placements';
+            renderWordPool();
+        }
+        
+        function updateWordItem(index, field, value) {
+            if (field === 'word') {
+                value = value.toUpperCase().replace(/[^A-Z]/g, '');
+                if (!value) return; 
+            }
+            state.wordPool[index][field] = value;
+        }
+
+        function dragWord(e, index) {
+            e.dataTransfer.setData("wordIndex", index);
+        }
+
+        function dropWord(e, r, c) {
+            e.preventDefault();
+            let index = parseInt(e.dataTransfer.getData("wordIndex"));
+            if (isNaN(index)) return;
+            
+            let word = state.wordPool[index];
+            let dir = word.manualPlacement?.dir || word.currentPlacement?.dir || 'across';
+            
+            if (word.manualPlacement && word.manualPlacement.r === r && word.manualPlacement.c === c) {
+                dir = dir === 'across' ? 'down' : 'across';
+            }
+            
+            word.manualPlacement = { r, c, dir };
+            state.isEditingLayout = true; 
+            generateCrossword();
+        }
+
+        function updateWordLayout(index, field, value) {
+            let wordObj = state.wordPool[index];
+            if (!wordObj.manualPlacement) {
+                let cp = wordObj.currentPlacement || {r: 0, c: 0, dir: 'across'};
+                wordObj.manualPlacement = { r: cp.r, c: cp.c, dir: cp.dir };
+            }
+            
+            if (field === 'dir') {
+                wordObj.manualPlacement[field] = value;
+            } else {
+                let num = parseInt(value);
+                if (isNaN(num)) num = 0;
+                wordObj.manualPlacement[field] = num;
+            }
+        }
+
+        function removeWord(index) {
+            state.wordPool.splice(index, 1);
+            renderWordPool();
+        }
+
+        function clearWordPool() {
+            state.wordPool = [];
+            renderWordPool();
+            state.gridData = null; 
+            renderGrid();
+        }
+
+        function renderWordPool() {
+            DOM.wordCount.textContent = `(${state.wordPool.length} words)`;
+            
+            const layoutBtn = document.getElementById('toggle-layout-btn');
+            if (state.wordPool.length > 0) {
+                 layoutBtn.classList.remove('hidden');
+            } else {
+                 layoutBtn.classList.add('hidden');
+                 state.isEditingLayout = false;
+            }
+            
+            if (state.wordPool.length === 0) {
+                DOM.wordPoolList.innerHTML = '<p class="text-gray-400 italic text-center mt-8">No words added yet.</p>';
+                return;
+            }
+
+            DOM.wordPoolList.innerHTML = state.wordPool.map((item, index) => {
+                let layoutUI = '';
+                if (state.isEditingLayout) {
+                    let rVal = item.manualPlacement ? item.manualPlacement.r : (item.currentPlacement ? item.currentPlacement.r : '');
+                    let cVal = item.manualPlacement ? item.manualPlacement.c : (item.currentPlacement ? item.currentPlacement.c : '');
+                    let dirVal = item.manualPlacement ? item.manualPlacement.dir : (item.currentPlacement ? item.currentPlacement.dir : 'across');
+                    let isManual = item.manualPlacement !== null;
+                    
+                    layoutUI = `
+                        <div class="mt-3 flex gap-2 items-center bg-gray-100 p-2 rounded text-sm">
+                            <span class="text-xs text-gray-500 font-bold w-12">${isManual ? 'MANUAL' : 'AUTO'}</span>
+                            <label>R: <input type="number" value="${rVal}" onchange="updateWordLayout(${index}, 'r', this.value)" class="w-12 p-1 border rounded bg-white"></label>
+                            <label>C: <input type="number" value="${cVal}" onchange="updateWordLayout(${index}, 'c', this.value)" class="w-12 p-1 border rounded bg-white"></label>
+                            <select onchange="updateWordLayout(${index}, 'dir', this.value)" class="p-1 border rounded bg-white">
+                                <option value="across" ${dirVal === 'across' ? 'selected' : ''}>Across</option>
+                                <option value="down" ${dirVal === 'down' ? 'selected' : ''}>Down</option>
+                            </select>
+                            ${isManual ? `<button onclick="state.wordPool[${index}].manualPlacement = null; renderWordPool()" class="ml-auto text-xs text-red-500 hover:underline">Reset</button>` : ''}
+                        </div>
+                    `;
+                }
+
+                return `
+                <div class="flex flex-col bg-white p-3 rounded-lg border ${item.manualPlacement ? 'border-primary' : 'border-gray-100'} shadow-sm mb-2 transition-all">
+                    <div class="flex items-start">
+                        <div class="cursor-grab active:cursor-grabbing p-2 -ml-2 text-gray-400 hover:text-gray-700" draggable="true" ondragstart="dragWord(event, ${index})" title="Drag and drop onto preview grid">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </div>
+                        <div class="flex-grow min-w-0 mr-2 flex flex-col gap-1">
+                            <input type="text" class="font-bold text-primary tracking-wider w-full bg-transparent border-b border-transparent hover:border-gray-200 focus:border-primary outline-none uppercase transition-colors" value="${item.word}" onchange="updateWordItem(${index}, 'word', this.value)" onkeydown="if(event.key === 'Enter') this.blur();">
+                            <input type="text" class="text-sm text-gray-600 w-full bg-transparent border-b border-transparent hover:border-gray-200 focus:border-primary outline-none truncate transition-colors" value="${item.clue}" onchange="updateWordItem(${index}, 'clue', this.value)" onkeydown="if(event.key === 'Enter') this.blur();">
+                        </div>
+                        <button onclick="removeWord(${index})" class="text-red-400 hover:text-red-600 p-2 shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                    ${layoutUI}
+                </div>
+                `
+            }).join('');
+        }
+
+        function generateCrossword() {
+            if (state.wordPool.length < 2) {
+                showEditorMessage('Please add at least 2 words to generate a puzzle.', 'error');
+                return;
+            }
+
+            const btn = document.querySelector('button[onclick="generateCrossword()"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Generating...';
+            btn.disabled = true;
+
+            setTimeout(() => {
+                const unplaced = generateCrosswordInternal(state.wordPool);
+                
+                if (unplaced === null) {
+                    showEditorMessage('Failed to generate any puzzle.', 'error');
+                } else if (unplaced.length > 0) {
+                    const unplacedWordsStr = unplaced.map(u => u.word).join(', ');
+                    showAlert("Generation Incomplete", `Could not fit the following words within 15x15 or due to conflicts: ${unplacedWordsStr}. Try removing them, adding different words, or adjusting manual placements.`);
+                    showEditorMessage(`Generated with ${state.wordPool.length - unplaced.length} words.`, 'success');
+                } else {
+                    showEditorMessage('Puzzle generated successfully!', 'success');
+                }
+
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }, 50);
+        }
+
+        function showEditorMessage(msg, type) {
+            DOM.editorMsg.textContent = msg;
+            DOM.editorMsg.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700');
+            
+            if (type === 'error') {
+                DOM.editorMsg.classList.add('bg-red-100', 'text-red-700');
+            } else {
+                DOM.editorMsg.classList.add('bg-green-100', 'text-green-700');
+            }
+
+            setTimeout(() => {
+                DOM.editorMsg.classList.add('hidden');
+            }, 3000);
+        }
+
+        function showAlert(title, message) {
+            document.getElementById('alert-title').textContent = title;
+            document.getElementById('alert-message').textContent = message;
+            const modal = document.getElementById('alert-modal');
+            modal.classList.remove('hidden');
+        }
+
+        function closeAlert() {
+            document.getElementById('alert-modal').classList.add('hidden');
+        }
+
+        function setupEventListeners() {
+            document.getElementById('auth-password').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') verifyPassword();
+            });
+
+            DOM.editorWord.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') DOM.editorClue.focus();
+            });
+            DOM.editorClue.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') addWordToPool();
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (state.mode !== 'player') return;
+                if (document.activeElement.tagName === 'INPUT' && document.activeElement.id !== 'hidden-input') return;
+
+                if (e.key === 'Backspace') {
+                    e.preventDefault();
+                    handleBackspace();
+                } else if (e.key.length === 1 && e.key.match(/^[a-z]$/i)) {
+                    // To prevent duplicate letters from mobile keyboards that trigger both keydown and input
+                    // We let hiddenInput handle it if it's focused. Desktop usually works fine, 
+                    // but we ensure we prevent default here and trigger our logic ONLY if it's purely desktop 
+                    // (Mobile soft keyboards often emit 229 Unidentified for e.key)
+                    e.preventDefault();
+                    typeLetter(e.key);
+                } else if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+                    e.preventDefault(); 
+                    handleArrowKeys(e.key);
+                }
+            });
+            
+            DOM.hiddenInput.addEventListener('input', (e) => {
+                if (e.data && e.data.match(/^[a-z]$/i)) {
+                    typeLetter(e.data);
+                }
+                DOM.hiddenInput.value = ''; 
+            });
+        }
+
+        function handleArrowKeys(key) {
+            let r = state.playerState.activeRow;
+            let c = state.playerState.activeCol;
+            if (r === -1) return;
+            
+            let nextR = r, nextC = c;
+            if (key === 'ArrowRight') nextC++;
+            if (key === 'ArrowLeft') nextC--;
+            if (key === 'ArrowDown') nextR++;
+            if (key === 'ArrowUp') nextR--;
+            
+            if (nextR >= 0 && nextR < state.gridData.rows && nextC >= 0 && nextC < state.gridData.cols && state.gridData.grid[nextR][nextC] !== null) {
+                state.playerState.activeRow = nextR;
+                state.playerState.activeCol = nextC;
+                
+                if ((key === 'ArrowRight' || key === 'ArrowLeft') && state.playerState.direction !== 'across') {
+                     state.playerState.direction = 'across';
+                } else if ((key === 'ArrowUp' || key === 'ArrowDown') && state.playerState.direction !== 'down') {
+                     state.playerState.direction = 'down';
+                }
+
+                updateActiveClue();
+                renderGrid();
+                renderClues();
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
